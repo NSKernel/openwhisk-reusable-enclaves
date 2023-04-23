@@ -36,6 +36,8 @@ import org.apache.openwhisk.core.database.CacheChangeNotification
 import org.apache.openwhisk.core.entity.Attachments._
 import org.apache.openwhisk.core.entity.types.EntityStore
 
+import org.nskernel.reusable.UNIXSocketClient
+
 /**
  * ActionLimitsOption mirrors ActionLimits but makes both the timeout and memory
  * limit optional so that it is convenient to override just one limit at a time.
@@ -432,11 +434,23 @@ object WhiskAction extends DocumentFactory[WhiskAction] with WhiskEntityQueries[
     val inlineActionCode: WhiskAction => Future[WhiskAction] = { action =>
       def getWithAttachment(attached: Attached, binary: Boolean, exec: AttachedCode) = {
         val boas = new ByteArrayOutputStream()
-        val wrapped = if (binary) Base64.getEncoder().wrap(boas) else boas
+        // val wrapped = if (binary) Base64.getEncoder().wrap(boas) else boas
 
-        getAttachment[A](db, action, attached, wrapped, Some { a: WhiskAction =>
-          wrapped.close()
-          val newAction = a.copy(exec = exec.inline(boas.toByteArray))
+        getAttachment[A](db, action, attached, boas, Some { a: WhiskAction =>
+          //wrapped.close()
+          
+          // Re-encrypt the stuff
+          val codeBin = boas.toByteArray
+          val encCodeBin = UNIXSocketClient.reencryptToWorkerEnclave(codeBin, codeBin.length)
+
+          //var textEncoded: Array[Byte] = _
+          //if (binary) {
+            val textEncoded = Base64.getEncoder().encode(encCodeBin)
+          //}
+          //else {
+          //  textEncoded = encCodeBin
+          //}
+          val newAction = a.copy(exec = exec.inline(textEncoded))
           newAction.revision(a.rev)
           newAction
         })
